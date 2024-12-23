@@ -9,8 +9,8 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -21,6 +21,7 @@ import (
 
 const (
 	serviceName = "example-service"
+	o2Org       = "r1"
 )
 
 var (
@@ -46,7 +47,7 @@ func initProvider() (func(context.Context) error, error) {
 	// Configure OTLP exporter
 	traceExporter, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpoint("localhost:5080"),
-		otlptracehttp.WithURLPath("/api/default/v1/traces"),
+		otlptracehttp.WithURLPath("/api/"+o2Org+"/v1/traces"),
 		otlptracehttp.WithInsecure(), // Explicitly use HTTP instead of HTTPS
 		otlptracehttp.WithHeaders(map[string]string{
 			"Authorization": "Basic cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=",
@@ -68,7 +69,7 @@ func initProvider() (func(context.Context) error, error) {
 	// Configure metrics exporter
 	metricExporter, err := otlpmetrichttp.New(ctx,
 		otlpmetrichttp.WithEndpoint("localhost:5080"),
-		otlpmetrichttp.WithURLPath("/api/default/v1/metrics"),
+		otlpmetrichttp.WithURLPath("/api/"+o2Org+"/v1/metrics"),
 		otlpmetrichttp.WithInsecure(), // Explicitly use HTTP instead of HTTPS
 		otlpmetrichttp.WithHeaders(map[string]string{
 			"Authorization": "Basic cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=",
@@ -78,10 +79,12 @@ func initProvider() (func(context.Context) error, error) {
 		return nil, fmt.Errorf("failed to create metric exporter: %w", err)
 	}
 
-	// Configure metric provider
+	// Configure metric provider with exemplar support
 	meterProvider := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter, sdkmetric.WithInterval(1*time.Second))),
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter,
+			sdkmetric.WithInterval(1*time.Second),
+		)),
 	)
 	otel.SetMeterProvider(meterProvider)
 	meter = meterProvider.Meter(serviceName)
@@ -121,10 +124,13 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		attribute.String("http.url", r.URL.String()),
 	)
 
-	// Increment request counter
+	// Increment request counter with current trace context
+	spanCtx := trace.SpanContextFromContext(ctx)
 	counter.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String("endpoint", r.URL.Path),
+			attribute.String("trace_id", spanCtx.TraceID().String()),
+			attribute.String("span_id", spanCtx.SpanID().String()),
 		),
 	)
 
@@ -150,7 +156,7 @@ func main() {
 
 	// Set up HTTP server
 	http.HandleFunc("/", handleRequest)
-	
+
 	log.Printf("Starting server on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)

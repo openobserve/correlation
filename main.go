@@ -5,7 +5,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
+
+	"log"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -19,9 +22,23 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"log"
 )
 
+// Add constants before the function:
+const (
+	EnvOtlpEndpoint  = "OTLP_ENDPOINT"
+	EnvOtlpAuthToken = "OTLP_AUTH_TOKEN"
+	DefaultEndpoint  = "localhost:5080"
+	DefaultAuthToken = "cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=" // base64("root@example.com:Complexpass#123")
+)
+
+// Add helper function:
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
 
 // otlpWriter implements zapcore.WriteSyncer interface
 type otlpWriter struct {
@@ -84,11 +101,11 @@ func initProvider() (func(context.Context) error, error) {
 
 	// Configure OTLP exporter
 	traceExporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint("localhost:5080"),
+		otlptracehttp.WithEndpoint(getEnvOrDefault(EnvOtlpEndpoint, DefaultEndpoint)),
 		otlptracehttp.WithURLPath("/api/default/v1/traces"),
 		otlptracehttp.WithInsecure(), // Explicitly use HTTP instead of HTTPS
 		otlptracehttp.WithHeaders(map[string]string{
-			"Authorization": "Basic cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=",
+			"Authorization": "Basic " + getEnvOrDefault(EnvOtlpAuthToken, DefaultAuthToken),
 		}),
 	)
 	if err != nil {
@@ -106,11 +123,11 @@ func initProvider() (func(context.Context) error, error) {
 
 	// Configure metrics exporter
 	metricExporter, err := otlpmetrichttp.New(ctx,
-		otlpmetrichttp.WithEndpoint("localhost:5080"),
+		otlpmetrichttp.WithEndpoint(getEnvOrDefault(EnvOtlpEndpoint, DefaultEndpoint)),
 		otlpmetrichttp.WithURLPath("/api/default/v1/metrics"),
 		otlpmetrichttp.WithInsecure(), // Explicitly use HTTP instead of HTTPS
 		otlpmetrichttp.WithHeaders(map[string]string{
-			"Authorization": "Basic cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=",
+			"Authorization": "Basic " + getEnvOrDefault(EnvOtlpAuthToken, DefaultAuthToken),
 		}),
 	)
 	if err != nil {
@@ -120,7 +137,7 @@ func initProvider() (func(context.Context) error, error) {
 	// Configure metric provider with exemplar support
 	meterProvider := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter, 
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter,
 			sdkmetric.WithInterval(1*time.Second),
 		)),
 	)
@@ -157,10 +174,10 @@ func initProvider() (func(context.Context) error, error) {
 	core := zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderConfig),
 		zapcore.AddSync(&otlpWriter{
-			endpoint: "http://localhost:5080/api/default/default/_json",
+			endpoint: "http://" + getEnvOrDefault(EnvOtlpEndpoint, DefaultEndpoint) + "/api/default/default/_json",
 			headers: map[string]string{
 				"Content-Type":  "application/json",
-				"Authorization": "Basic cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=",
+				"Authorization": "Basic  " + getEnvOrDefault(EnvOtlpAuthToken, DefaultAuthToken),
 			},
 		}),
 		zapcore.InfoLevel,
@@ -242,7 +259,7 @@ func main() {
 
 	// Set up HTTP server
 	http.HandleFunc("/", handleRequest)
-	
+
 	log.Printf("Starting server on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)

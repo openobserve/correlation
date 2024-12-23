@@ -1,4 +1,4 @@
-module github.com/prabhatsharma/o1
+module github.com/openobserve/correlation
 
 go 1.23.3
 

@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -17,17 +17,55 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"log"
 )
+
+
+// otlpWriter implements zapcore.WriteSyncer interface
+type otlpWriter struct {
+	endpoint string
+	headers  map[string]string
+}
+
+func (w *otlpWriter) Write(p []byte) (n int, err error) {
+	req, err := http.NewRequest("POST", w.endpoint, bytes.NewBuffer(p))
+	if err != nil {
+		return 0, err
+	}
+
+	for k, v := range w.headers {
+		req.Header.Set(k, v)
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	return len(p), nil
+}
+
+func (w *otlpWriter) Sync() error {
+	return nil
+}
 
 const (
 	serviceName = "example-service"
-	o2Org       = "r1"
 )
 
 var (
 	tracer  trace.Tracer
 	meter   metric.Meter
 	counter metric.Int64Counter
+	logger  *zap.Logger
 )
 
 func initProvider() (func(context.Context) error, error) {
@@ -47,7 +85,7 @@ func initProvider() (func(context.Context) error, error) {
 	// Configure OTLP exporter
 	traceExporter, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpoint("localhost:5080"),
-		otlptracehttp.WithURLPath("/api/"+o2Org+"/v1/traces"),
+		otlptracehttp.WithURLPath("/api/default/v1/traces"),
 		otlptracehttp.WithInsecure(), // Explicitly use HTTP instead of HTTPS
 		otlptracehttp.WithHeaders(map[string]string{
 			"Authorization": "Basic cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=",
@@ -69,7 +107,7 @@ func initProvider() (func(context.Context) error, error) {
 	// Configure metrics exporter
 	metricExporter, err := otlpmetrichttp.New(ctx,
 		otlpmetrichttp.WithEndpoint("localhost:5080"),
-		otlpmetrichttp.WithURLPath("/api/"+o2Org+"/v1/metrics"),
+		otlpmetrichttp.WithURLPath("/api/default/v1/metrics"),
 		otlpmetrichttp.WithInsecure(), // Explicitly use HTTP instead of HTTPS
 		otlpmetrichttp.WithHeaders(map[string]string{
 			"Authorization": "Basic cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=",
@@ -82,7 +120,7 @@ func initProvider() (func(context.Context) error, error) {
 	// Configure metric provider with exemplar support
 	meterProvider := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter,
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter, 
 			sdkmetric.WithInterval(1*time.Second),
 		)),
 	)
@@ -99,6 +137,45 @@ func initProvider() (func(context.Context) error, error) {
 		return nil, fmt.Errorf("failed to create counter: %w", err2)
 	}
 
+	// Configure Zap logger
+	encoderConfig := zapcore.EncoderConfig{
+		TimeKey:        "timestamp",
+		LevelKey:       "level",
+		NameKey:        "logger",
+		CallerKey:      "caller",
+		FunctionKey:    zapcore.OmitKey,
+		MessageKey:     "message",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.LowercaseLevelEncoder,
+		EncodeTime:     zapcore.ISO8601TimeEncoder,
+		EncodeDuration: zapcore.SecondsDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+
+	// Create core for OTLP HTTP endpoint
+	core := zapcore.NewCore(
+		zapcore.NewJSONEncoder(encoderConfig),
+		zapcore.AddSync(&otlpWriter{
+			endpoint: "http://localhost:5080/api/default/default/_json",
+			headers: map[string]string{
+				"Content-Type":  "application/json",
+				"Authorization": "Basic cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=",
+			},
+		}),
+		zapcore.InfoLevel,
+	)
+
+	// Create logger
+	logger = zap.New(core,
+		zap.WithCaller(true),
+		zap.Fields(
+			zap.String("service.name", serviceName),
+			zap.String("service.version", "1.0.0"),
+		),
+	)
+	defer logger.Sync()
+
 	// Return shutdown function
 	return func(ctx context.Context) error {
 		if err := tracerProvider.Shutdown(ctx); err != nil {
@@ -107,6 +184,7 @@ func initProvider() (func(context.Context) error, error) {
 		if err := meterProvider.Shutdown(ctx); err != nil {
 			return fmt.Errorf("failed to shutdown meter provider: %w", err)
 		}
+		// No logsProvider to shutdown
 		return nil
 	}, nil
 }
@@ -122,6 +200,14 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	span.SetAttributes(
 		attribute.String("http.method", r.Method),
 		attribute.String("http.url", r.URL.String()),
+	)
+
+	// Add log with trace context
+	logger.Info("Handling request",
+		zap.String("http.method", r.Method),
+		zap.String("http.url", r.URL.String()),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("span_id", span.SpanContext().SpanID().String()),
 	)
 
 	// Increment request counter with current trace context
@@ -156,7 +242,7 @@ func main() {
 
 	// Set up HTTP server
 	http.HandleFunc("/", handleRequest)
-
+	
 	log.Printf("Starting server on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)

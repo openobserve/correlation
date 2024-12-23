@@ -1,6 +1,6 @@
 # Correlation sample (Logs, Metrics, Traces)
 
-Setup following environent variables. Default values are mentioned below:
+Setup following environment variables. Default values are mentioned below:
 
 ```shell
 OTLP_ENDPOINT = "localhost:5080"

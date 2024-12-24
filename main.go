@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"log"
@@ -23,6 +24,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+var requestCount atomic.Int64
 
 // Add constants before the function:
 const (
@@ -229,7 +232,8 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Increment request counter with current trace context
 	spanCtx := trace.SpanContextFromContext(ctx)
-	counter.Add(ctx, 1,
+	currentCount := requestCount.Add(1)
+	counter.Add(ctx, currentCount,
 		metric.WithAttributes(
 			attribute.String("endpoint", r.URL.Path),
 			attribute.String("trace_id", spanCtx.TraceID().String()),

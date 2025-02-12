@@ -119,7 +119,7 @@ func initProvider() (func(context.Context) error, error) {
 	tracerProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
 		sdktrace.WithBatcher(traceExporter),
-		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(0.1)), // Changed to 10% sampling
+		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(1.0)), // Changed to 100% sampling
 	)
 	otel.SetTracerProvider(tracerProvider)
 	tracer = tracerProvider.Tracer(serviceName)

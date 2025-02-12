@@ -117,10 +117,10 @@ func initProvider() (func(context.Context) error, error) {
 
 	// Configure trace provider
 	tracerProvider := sdktrace.NewTracerProvider(
-        sdktrace.WithResource(res),
-        sdktrace.WithBatcher(traceExporter),
-        sdktrace.WithSampler(sdktrace.TraceIDRatioBased(0.1)), // Changed to 10% sampling
-    )
+		sdktrace.WithResource(res),
+		sdktrace.WithBatcher(traceExporter),
+		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(0.1)), // Changed to 10% sampling
+	)
 	otel.SetTracerProvider(tracerProvider)
 	tracer = tracerProvider.Tracer(serviceName)
 
@@ -231,15 +231,14 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// Increment request counter with current trace context
-	spanCtx := trace.SpanContextFromContext(ctx)
+	// spanCtx := trace.SpanContextFromContext(ctx)
 	currentCount := requestCount.Add(1)
-	counter.Add(ctx, currentCount,
-		metric.WithAttributes(
-			attribute.String("endpoint", r.URL.Path),
-			attribute.String("trace_id", spanCtx.TraceID().String()),
-			attribute.String("span_id", spanCtx.SpanID().String()),
-		),
+	measurementOption := metric.WithAttributes(
+		attribute.String("endpoint", r.URL.Path),
+		// attribute.String("trace_id", spanCtx.TraceID().String()),
+		// attribute.String("span_id", spanCtx.SpanID().String()),
 	)
+	counter.Add(ctx, currentCount, measurementOption)
 
 	// Simulate some work
 	time.Sleep(100 * time.Millisecond)

@@ -235,8 +235,6 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	currentCount := requestCount.Add(1)
 	measurementOption := metric.WithAttributes(
 		attribute.String("endpoint", r.URL.Path),
-		// attribute.String("trace_id", spanCtx.TraceID().String()),
-		// attribute.String("span_id", spanCtx.SpanID().String()),
 	)
 	counter.Add(ctx, currentCount, measurementOption)
 

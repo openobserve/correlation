@@ -1,8 +1,23 @@
 # Correlation sample (Logs, Metrics, Traces)
 
-Setup following environment variables. Default values are mentioned below:
+## Setup following environment variables. Default values are mentioned below:
 
 ```shell
 OTLP_ENDPOINT = "localhost:5080"
 OTLP_AUTH_TOKEN = "cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM="
 ```
+## Start openobserve
+
+Start `openobserve` server, its GUI should be accessible on http://localhost:5080/web/
+
+## Make requests
+
+Generate requests using
+
+```
+curl -v http://localhost:8080/
+```
+
+## Observe
+
+Go to http://localhost:5080/web/ and check `Logs`, `Metrics`, `Traces`.
